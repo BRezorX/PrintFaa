@@ -1,0 +1,6 @@
+{
+  "name": "Scan & Print Kiosk",
+  "description": "Automated self-service printing kiosk with multi-shopkeeper support, allowing each store to manage distinct counter QR codes, custom rates, isolated print queues, and hardware diagnostic controls.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

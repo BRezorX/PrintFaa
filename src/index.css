@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #F7F9FB;
+  --surface: #FFFFFF;
+  --ink: #1C1B1F;
+  --accent: #006A6A;
+  --on-accent: #FFFFFF;
+  --accent-container: #CCE8E8;
+  --on-accent-container: #052020;
+  --outline: #79747E;
+  --outline-variant: #CAC4D0;
+  --surface-variant: #E7E0EB;
+  --ink-faint: rgba(28, 27, 31, 0.12);
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: 'Roboto', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-brand {
+  font-family: 'Inter', sans-serif;
+}
+
+.font-mono-code {
+  font-family: 'Roboto Mono', monospace;
+}
+
+/* Material Design v3 Components */
+.m3-card {
+  background: var(--surface);
+  border-radius: 28px;
+  border: 1px solid var(--outline-variant);
+}
+
+.m3-hero {
+  background: var(--accent-container);
+  color: var(--on-accent-container);
+  border-radius: 28px;
+}
+
+.m3-step-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  background: var(--accent);
+  color: var(--on-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.btn-m3 {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 20px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.btn-m3-filled {
+  background: var(--ink);
+  color: #FFFFFF;
+}
+
+.btn-m3-filled:hover {
+  background: #313033;
+}
+
+.btn-m3-accent {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.btn-m3-accent:hover {
+  background: #005353;
+}
+
+.btn-m3-tonal {
+  background: var(--accent-container);
+  color: var(--on-accent-container);
+}
+
+.btn-m3-tonal:hover {
+  background: #b5dede;
+}
+
+.btn-m3-outlined {
+  border: 1px solid var(--outline);
+  background: transparent;
+  color: var(--ink);
+}
+
+.btn-m3-outlined:hover {
+  background: rgba(0, 106, 106, 0.05);
+}
+
+::selection {
+  background: var(--accent-container);
+  color: var(--on-accent-container);
+}
