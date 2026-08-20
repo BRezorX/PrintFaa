@@ -26,13 +26,30 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
     const isImage = file.type.startsWith('image/');
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
 
+    const uploadToServer = async (fileToUpload: File): Promise<string> => {
+      setLoadingStatus('Uploading document to print queue...');
+      const formData = new FormData();
+      formData.append('file', fileToUpload);
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!res.ok) {
+        throw new Error('Upload failed');
+      }
+      const data = await res.json();
+      return data.fileId;
+    };
+
     try {
+      const serverFileId = await uploadToServer(file);
+
       if (isPdf) {
         setLoadingStatus('Rendering PDF pages & high-res vector proofs...');
         const parsed = await parseAndRenderPdf(file);
 
         const uploaded: UploadedFile = {
-          id: 'file-' + Date.now(),
+          id: serverFileId,
           name: file.name,
           size: file.size,
           type: file.type || 'application/pdf',
@@ -72,7 +89,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
           ];
 
           const uploaded: UploadedFile = {
-            id: 'file-' + Date.now(),
+            id: serverFileId,
             name: file.name,
             size: file.size,
             type: file.type || 'image/jpeg',
@@ -117,7 +134,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
         });
 
         const uploaded: UploadedFile = {
-          id: 'file-' + Date.now(),
+          id: serverFileId,
           name: file.name,
           size: file.size,
           type: file.type || 'text/plain',
@@ -150,7 +167,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
       }));
 
       const uploaded: UploadedFile = {
-        id: 'file-' + Date.now(),
+        id: serverFileId,
         name: file.name,
         size: file.size,
         type: file.type || 'application/octet-stream',
@@ -173,6 +190,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
     } catch (err) {
       console.error('Error processing file:', err);
       setIsLoading(false);
+      alert('Unable to process or upload your document. Please verify the format and try again.');
     }
   };
 

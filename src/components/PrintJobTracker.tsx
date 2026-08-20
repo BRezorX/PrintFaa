@@ -26,49 +26,64 @@ export const PrintJobTracker: React.FC<PrintJobTrackerProps> = ({
   const [statusText, setStatusText] = useState<string>('Sending job to printer spooler...');
   const [activePrintingPage, setActivePrintingPage] = useState<number>(1);
 
+  const totalSheets = Math.max(1, job.sheetsNeeded);
+
   useEffect(() => {
-    if (job.status === 'completed' || job.status === 'ready') {
-      setProgress(100);
-      setStatusText('All pages printed successfully! Ready for pickup.');
+    setProgress(job.printProgress || 0);
+
+    if (job.status === 'printing' && soundEnabled) {
+      playPrinterStepSound();
+    }
+
+    switch (job.status) {
+      case 'pending_payment':
+        setStatusText('Waiting for payment confirmation...');
+        break;
+      case 'paid':
+        setStatusText('Payment verified! Document queued for printing...');
+        break;
+      case 'spooling':
+        setStatusText('Rasterizing PDF & spooling data to laser printer...');
+        break;
+      case 'printing': {
+        const currentPct = job.printProgress || 25;
+        const pageIdx = Math.min(totalSheets, Math.max(1, Math.ceil(((currentPct - 25) / 70) * totalSheets)));
+        setActivePrintingPage(pageIdx);
+        setStatusText(`Printing sheet ${pageIdx} of ${totalSheets} (${job.settings.colorMode === 'bw' ? 'Monochrome' : 'CMYK Color'})...`);
+        break;
+      }
+      case 'ready':
+      case 'completed':
+        setStatusText('All pages printed successfully! Ready for pickup.');
+        break;
+      case 'cancelled':
+        setStatusText('Print job has been cancelled. Please contact the counter.');
+        break;
+      default:
+        setStatusText('Connecting to printer spooler...');
+    }
+  }, [job, soundEnabled, totalSheets]);
+
+  // Polling fallback to ensure reliability
+  useEffect(() => {
+    if (job.status === 'completed' || job.status === 'ready' || job.status === 'cancelled') {
       return;
     }
 
-    // Step through the printing simulation
-    const totalSheets = Math.max(1, job.sheetsNeeded);
-    let currentStep = 0;
-    const totalSteps = 12;
-
-    const interval = setInterval(() => {
-      currentStep++;
-      const currentPct = Math.min(100, Math.round((currentStep / totalSteps) * 100));
-      setProgress(currentPct);
-
-      if (currentPct < 25) {
-        setStatusText('Rasterizing PDF & spooling data to Brother LaserJet...');
-        onUpdateProgress(job.id, currentPct, 'spooling');
-      } else if (currentPct < 50) {
-        setStatusText(`Warming laser fuser & feeding sheet 1 of ${totalSheets}...`);
-        if (soundEnabled && currentStep % 2 === 0) {
-          playPrinterStepSound();
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/jobs/${job.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          onUpdateProgress(job.id, data.printProgress, data.status);
         }
-        onUpdateProgress(job.id, currentPct, 'printing');
-      } else if (currentPct < 95) {
-        const pageIdx = Math.min(totalSheets, Math.ceil((currentPct - 40) / (55 / totalSheets)));
-        setActivePrintingPage(pageIdx);
-        setStatusText(`Printing sheet ${pageIdx} of ${totalSheets} (${job.settings.colorMode === 'bw' ? 'Monochrome' : 'CMYK Color'})...`);
-        if (soundEnabled) {
-          playPrinterStepSound();
-        }
-        onUpdateProgress(job.id, currentPct, 'printing');
-      } else {
-        setStatusText('Finishing tray output & validating print quality...');
-        onUpdateProgress(job.id, 100, 'ready');
-        clearInterval(interval);
+      } catch (err) {
+        console.warn('Polling fallback error:', err);
       }
-    }, 800);
+    }, 4000);
 
     return () => clearInterval(interval);
-  }, [job.id, job.status, job.sheetsNeeded, job.settings.colorMode, soundEnabled]);
+  }, [job.id, job.status, onUpdateProgress]);
 
   const isComplete = progress >= 100;
 

@@ -85,10 +85,20 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     }
   };
 
-  const executePayment = (method: 'upi' | 'card' | 'wallet' | 'cash') => {
+  const executePayment = async (method: 'upi' | 'card' | 'wallet' | 'cash') => {
     setIsProcessing(true);
 
-    setTimeout(() => {
+    try {
+      const res = await fetch(`/api/jobs/${job.id}/pay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentMethod: method }),
+      });
+      if (!res.ok) {
+        throw new Error('Payment approval failed');
+      }
+      const updatedJob = await res.json();
+
       setIsProcessing(false);
       playSuccessChime();
 
@@ -99,15 +109,19 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         origin: { y: 0.6 },
       });
 
-      const txId = 'TXN-' + Math.random().toString(36).substring(2, 9).toUpperCase();
-
-      onPaymentSuccess({
-        method,
-        transactionId: txId,
-        paidAt: Date.now(),
-        amount: finalAmount,
-      });
-    }, 1600);
+      if (updatedJob.payment) {
+        onPaymentSuccess({
+          method: updatedJob.payment.method,
+          transactionId: updatedJob.payment.transactionId,
+          paidAt: updatedJob.payment.paidAt,
+          amount: updatedJob.payment.amount,
+        });
+      }
+    } catch (err) {
+      console.error('Payment Error:', err);
+      setIsProcessing(false);
+      alert('Payment could not be verified on the server. Please try again.');
+    }
   };
 
   if (!isOpen) return null;

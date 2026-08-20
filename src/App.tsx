@@ -63,20 +63,96 @@ export default function App() {
   // Global Print Jobs Queue (persisted)
   const [jobs, setJobs] = useState<PrintJob[]>(() => loadJobsFromStorage());
 
-  // Save shopkeepers to storage on update
+  // Fetch shopkeepers from backend on mount
   useEffect(() => {
-    saveShopkeepersToStorage(shopkeepers);
-  }, [shopkeepers]);
+    fetch('/api/shops')
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setShopkeepers(data);
+        }
+      })
+      .catch((err) => console.error('Failed to fetch shops:', err));
+  }, []);
 
-  // Save active shop ID to storage
+  // Fetch jobs for active shop on activeShopId change
   useEffect(() => {
-    saveActiveShopId(activeShopId);
+    if (activeShopId) {
+      fetch(`/api/shops/${activeShopId}/jobs`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (Array.isArray(data)) {
+            setJobs(data);
+          }
+        })
+        .catch((err) => console.error('Failed to fetch jobs:', err));
+    }
   }, [activeShopId]);
 
-  // Save jobs to storage on update
+  // WebSocket subscription for live status changes
   useEffect(() => {
-    saveJobsToStorage(jobs);
-  }, [jobs]);
+    const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+    const socket = new WebSocket(wsUrl);
+
+    socket.onopen = () => {
+      console.log('WebSocket Connected');
+      if (activeJob) {
+        socket.send(JSON.stringify({ type: 'SUBSCRIBE', jobId: activeJob.id }));
+      }
+      if (activeShopId) {
+        socket.send(JSON.stringify({ type: 'SUBSCRIBE_SHOP', shopId: activeShopId }));
+      }
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'JOB_UPDATED') {
+          const updatedJob: PrintJob = message.job;
+          
+          // Update activeJob if it is the current one
+          setActiveJob((current) => {
+            if (current && current.id === updatedJob.id) {
+              return updatedJob;
+            }
+            return current;
+          });
+
+          // Update jobs list
+          setJobs((currentJobs) => {
+            const index = currentJobs.findIndex(j => j.id === updatedJob.id);
+            if (index === -1) {
+              return [updatedJob, ...currentJobs];
+            }
+            const copy = [...currentJobs];
+            copy[index] = updatedJob;
+            return copy;
+          });
+        } else if (message.type === 'JOB_CREATED') {
+          const newJob: PrintJob = message.job;
+          setJobs((currentJobs) => {
+            if (currentJobs.some(j => j.id === newJob.id)) return currentJobs;
+            return [newJob, ...currentJobs];
+          });
+        } else if (message.type === 'SHOP_UPDATED') {
+          const updatedShop: Shopkeeper = message.shop;
+          setShopkeepers((prev) =>
+            prev.map((s) => (s.id === updatedShop.id ? updatedShop : s))
+          );
+        }
+      } catch (err) {
+        console.error('Failed to parse WebSocket message:', err);
+      }
+    };
+
+    socket.onclose = () => {
+      console.log('WebSocket disconnected');
+    };
+
+    return () => {
+      socket.close();
+    };
+  }, [activeJob?.id, activeShopId, currentView]);
 
   // Deep Link URL Detection for Page, Shop, and Station
   useEffect(() => {
@@ -115,7 +191,7 @@ export default function App() {
     } catch {
       // Ignore URL parse issues
     }
-  }, []);
+  }, [shopkeepers]);
 
   // Sync active station when active shop changes
   useEffect(() => {
@@ -169,9 +245,27 @@ export default function App() {
       }
     : null;
 
-  const handleProceedToPayment = () => {
-    if (!uploadedFile || !currentDraftJob) return;
-    setIsPaymentOpen(true);
+  const handleProceedToPayment = async () => {
+    if (!uploadedFile) return;
+    try {
+      const res = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shopId: activeShop.id,
+          stationId: activeStation.id,
+          file: uploadedFile,
+          settings: printSettings,
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to create print job');
+      const job = await res.json();
+      setActiveJob(job);
+      setIsPaymentOpen(true);
+    } catch (err) {
+      console.error('Error proceeding to payment:', err);
+      alert('Unable to process order on the server. Please try again.');
+    }
   };
 
   const handlePaymentSuccess = (paymentInfo: {
@@ -180,45 +274,61 @@ export default function App() {
     paidAt: number;
     amount: number;
   }) => {
-    if (!currentDraftJob) return;
-
-    const paidJob: PrintJob = {
-      ...currentDraftJob,
-      payment: paymentInfo,
-      status: 'spooling',
-      printProgress: 10,
-    };
-
     setIsPaymentOpen(false);
-    setActiveJob(paidJob);
-
-    // Add to global shopkeeper queue
-    setJobs((prev) => [paidJob, ...prev]);
+    if (activeJob) {
+      const updatedJob = {
+        ...activeJob,
+        payment: paymentInfo,
+        status: 'spooling' as const,
+        printProgress: 5,
+      };
+      setActiveJob(updatedJob);
+      setJobs((prev) => [updatedJob, ...prev]);
+    }
   };
 
   const handleUpdateJobProgress = (jobId: string, progress: number, status: PrintJob['status']) => {
-    setJobs((prev) =>
-      prev.map((j) => (j.id === jobId ? { ...j, printProgress: progress, status } : j))
-    );
+    // No-op client-side since updates come from WebSocket
   };
 
   const handleUpdateJobStatus = (jobId: string, status: PrintJob['status']) => {
     setJobs((prev) =>
       prev.map((j) => (j.id === jobId ? { ...j, status } : j))
     );
+    fetch(`/api/jobs/${jobId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }).catch((err) => console.error('Failed to update job status:', err));
   };
 
-  const handleReprintJob = (job: PrintJob) => {
-    const reprint: PrintJob = {
-      ...job,
-      id: 'job-' + Date.now(),
-      orderNumber: Math.floor(1000 + Math.random() * 9000).toString(),
-      status: 'spooling',
-      printProgress: 0,
-      createdAt: Date.now(),
-      pickupPin: Math.floor(1000 + Math.random() * 9000).toString(),
-    };
-    setJobs((prev) => [reprint, ...prev]);
+  const handleReprintJob = async (job: PrintJob) => {
+    try {
+      const res = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shopId: job.shopId,
+          stationId: job.stationId,
+          file: job.file,
+          settings: job.settings,
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to create reprint job');
+      const newJob = await res.json();
+      
+      const payRes = await fetch(`/api/jobs/${newJob.id}/pay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentMethod: 'cash' }),
+      });
+      if (!payRes.ok) throw new Error('Failed to approve reprint payment');
+      const paidReprint = await payRes.json();
+
+      setJobs((prev) => [paidReprint, ...prev]);
+    } catch (err) {
+      console.error('Failed to reprint job:', err);
+    }
   };
 
   const handleResetForAnotherPrint = () => {
@@ -230,10 +340,20 @@ export default function App() {
   // Shopkeeper management actions
   const handleUpdateShopkeeper = (updated: Shopkeeper) => {
     setShopkeepers((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    fetch(`/api/shops/${updated.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated),
+    }).catch((err) => console.error('Failed to update shopkeeper:', err));
   };
 
   const handleAddShopkeeper = (newShop: Shopkeeper) => {
     setShopkeepers((prev) => [...prev, newShop]);
+    fetch('/api/shops', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newShop),
+    }).catch((err) => console.error('Failed to add shop:', err));
   };
 
   const handleDeleteShopkeeper = (shopId: string) => {
@@ -241,6 +361,9 @@ export default function App() {
     const remaining = shopkeepers.filter((s) => s.id !== shopId);
     setShopkeepers(remaining);
     setActiveShopId(remaining[0].id);
+    fetch(`/api/shops/${shopId}`, {
+      method: 'DELETE',
+    }).catch((err) => console.error('Failed to delete shop:', err));
   };
 
   const handleStationSelectedFromModal = (station: Station, shopId?: string) => {
@@ -399,11 +522,11 @@ export default function App() {
       />
 
       {/* Payment & Checkout Modal */}
-      {currentDraftJob && (
+      {(activeJob || currentDraftJob) && (
         <PaymentModal
           isOpen={isPaymentOpen}
           onClose={() => setIsPaymentOpen(false)}
-          job={currentDraftJob}
+          job={activeJob || currentDraftJob!}
           pricingConfig={activeShop.pricingConfig}
           onPaymentSuccess={handlePaymentSuccess}
         />
